@@ -1,0 +1,28 @@
+[package]
+name = "reels-catalog-cl"
+version = "0.1.0"
+authors = ["drew"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+# logging
+log = "0.4"
+
+# serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# errors
+thiserror = "1.0"
+
+# ids
+uuid = { version = "0.8", features = ["v4", "serde"] }
+
+# date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# http
+reqwest = { version = "0.11", features = ["json"] }

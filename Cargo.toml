@@ -1,0 +1,7 @@
+[workspace]
+
+members = [
+    "catalog-sv",
+    "catalog-cl",
+]
+
