@@ -1,0 +1,25 @@
+version: '3'
+services:
+  database:
+    image: postgres:9.6.21
+    ports:
+      - 5432:5432
+    env_file:
+      - ../.env
+    volumes:
+      - database-data:/var/lib/postgresql/data/
+  index:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.12.0
+    ports:
+      - 9200:9200
+      - 9300:9300
+    environment:
+      - discovery.type=single-node
+    volumes:
+      - index-data:/usr/share/elasticsearch/data
+      - ./es/config.yml:/usr/share/elasticsearch/config/elasticsearch.yml
+      - ./es/jvm.options:/usr/share/elasticsearch/config/jvm.options.d/extra.options
+      - ./es/log4j2.properties:/usr/share/elasticsearch/config/log4j2.properties
+volumes:
+  database-data:
+  index-data:

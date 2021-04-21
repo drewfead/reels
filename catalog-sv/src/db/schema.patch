@@ -1,0 +1,17 @@
+diff --git a/src/db/schema.rs b/src/db/schema.rs
+index 04d5bb9..4a75092 100644
+--- a/src/db/schema.rs
++++ b/src/db/schema.rs
+@@ -4,9 +4,9 @@ table! {
+         title -> Text,
+         tagline -> Nullable<Text>,
+         overview -> Nullable<Text>,
+-        spoken_languages -> Array<Language>,
+-        production_countries -> Array<Country>,
+-        genres -> Array<Genre>,
++        spoken_languages -> Array<crate::db::types::PgLanguage>,
++        production_countries -> Array<crate::db::types::PgCountry>,
++        genres -> Array<crate::db::types::PgGenre>,
+         release_date -> Nullable<Date>,
+     }
+ }

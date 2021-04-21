@@ -1,0 +1,2 @@
+DROP INDEX title_release_date_idx;
+DROP INDEX release_date_title_idx;

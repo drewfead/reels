@@ -1,0 +1,48 @@
+[package]
+name = "reels-catalog-sv"
+version = "0.1.0"
+authors = ["drew"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# env
+dotenv = "0.15.0"
+
+# logging
+log = "0.4"
+env_logger = "0.8"
+
+# http
+actix-web = "3"
+
+# runtime
+futures = "0.3.1"
+
+# serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rmp-serde = "0.15.4"
+base64 = "0.13.0"
+
+# errors
+thiserror = "1.0"
+
+# ids
+uuid = { version = "0.8", features = ["v4", "v5", "serde"] }
+
+# date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# postgres
+diesel = { version = "1.4.4", features = ["postgres", "chrono", "r2d2", "extras", "uuidv07"] }
+r2d2 = "0.8"
+
+# elasticsearch
+# todo: update once actix is on tokio 1.0
+elasticsearch = "7.10.0-alpha.1"
+
+[dev-dependencies]
+
+
