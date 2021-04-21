@@ -2,6 +2,7 @@ package com.reels.catalog.backfill.client
 
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.TimeUnit
 
 import akka.NotUsed
 import akka.actor.typed.ActorSystem
@@ -10,13 +11,14 @@ import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
 import akka.http.scaladsl.model.headers.OAuth2BearerToken
 import akka.http.scaladsl.model.{HttpMethods, HttpRequest, HttpResponse, StatusCodes, Uri, headers}
 import akka.http.scaladsl.unmarshalling._
-import akka.stream.scaladsl.{Flow, Sink, Source}
+import akka.stream.scaladsl.{Flow, RetryFlow, Sink, Source}
 import com.reels.catalog.backfill.client.TheMovieDatabaseRequest.{Discover, Get}
 import com.reels.catalog.backfill.client.TheMovieDatabaseResponse.{Discoveries, Movie}
 import spray.json.{DefaultJsonProtocol, JsValue, JsonFormat, RootJsonFormat}
 
 import scala.collection.immutable
 import scala.concurrent.Future
+import scala.concurrent.duration.FiniteDuration
 import scala.util.{Failure, Success, Try}
 
 sealed trait TheMovieDatabaseResponse
@@ -108,7 +110,6 @@ class TheMovieDatabase(
   }
 
   type Req = TheMovieDatabaseRequest
-  type Res = TheMovieDatabaseResponse
 
   private def buildRequest[T]: Flow[(Req, T), (HttpRequest, T), NotUsed] =
     Flow[(TheMovieDatabaseRequest, T)].map {
@@ -122,39 +123,63 @@ class TheMovieDatabase(
     }
 
   type Call = Try[HttpResponse]
+  type TMDBR = TheMovieDatabaseResponse
+  type Err[T] = UnexpectedStatusCode[T]
+  type Res[O, T] = Either[Err[T], O]
 
-  private def parseResponse[O <: Res : RootJsonFormat, T]: Flow[(Call, T), (O, T), NotUsed] =
+  private def parseResponse[O <: TMDBR : RootJsonFormat, T]: Flow[(Call, T), (Res[O, T], T), NotUsed] =
     Flow[(Try[HttpResponse], T)].flatMapConcat {
       case (Success(res), span) => res.status match {
-        case StatusCodes.OK => Source.future(Unmarshal(res.entity).to[O]).map(_ -> span)
-        case status => Source.failed(UnexpectedStatusCode(status, span))
+        case StatusCodes.OK => Source.future(Unmarshal(res.entity).to[O]).map(o => Right[Err[T], O](o) -> span)
+        case status => Source.single(Left[Err[T], O](UnexpectedStatusCode(status, span)) -> span)
       }
       case (Failure(err), _) => Source.failed(err)
     }
 
-  private def requestFlow[O <: Res : RootJsonFormat, T]: Flow[(Req, T), (O, T), NotUsed] =
+  private def requestFlow[O <: TMDBR : RootJsonFormat, T]: Flow[(Req, T), (Res[O, T], T), NotUsed] =
     Flow[(TheMovieDatabaseRequest, T)]
       .via(buildRequest)
       .via(Http().superPool())
       .via(parseResponse[O, T])
 
-  private def single[O <: Res : RootJsonFormat, T](in: Req, span: T): Future[(O, T)] =
+  private def single[O <: TMDBR : RootJsonFormat, T](in: Req, span: T): Future[(Res[O, T], T)] =
     Source.single(in -> span)
       .via(requestFlow[O, T])
       .runWith(Sink.head)
 
-  def discoverSingle[T](in: Discover, span: T): Future[(Discoveries, T)] =
+  def discoverSingle[T](in: Discover, span: T): Future[(Res[Discoveries, T], T)] =
     single[Discoveries, T](in, span)
 
-  def movieSingle[T](in: Get, span: T): Future[(Movie, T)] =
+  def movieSingle[T](in: Get, span: T): Future[(Res[Movie, T], T)] =
     single[Movie, T](in, span)
 
-  private def flow[O <: Res : RootJsonFormat, T]: Flow[(Req, T), (O, T), NotUsed] =
-    requestFlow[O, T]
+  private val retryStatuses = Seq(
+    StatusCodes.InternalServerError,
+    StatusCodes.BadGateway,
+    StatusCodes.RequestTimeout,
+    StatusCodes.GatewayTimeout,
+    StatusCodes.ServiceUnavailable,
+    StatusCodes.NetworkConnectTimeout,
+    StatusCodes.NetworkReadTimeout,
+  )
 
-  def discoverFlow[T]: Flow[(Discover, T), (Discoveries, T), NotUsed] =
-    requestFlow[Discoveries, T]
+  def flow[O <: TMDBR : RootJsonFormat, T]: Flow[(Req, T), (Res[O, T], T), NotUsed] =
+    RetryFlow.withBackoff(
+      minBackoff = FiniteDuration(10, TimeUnit.MILLISECONDS),
+      maxBackoff = FiniteDuration(250, TimeUnit.MILLISECONDS),
+      randomFactor = 0d,
+      flow = requestFlow[O, T],
+      maxRetries = 3
+    ) {
+      case ((request, span), (Left(UnexpectedStatusCode(status, _)), _)) if retryStatuses.contains(status) =>
+        Some(request -> span)
+      case _ =>
+        None
+    }
 
-  def movieFlow[T]: Flow[(Get, T), (Movie, T), NotUsed] =
-    requestFlow[Movie, T]
+  def discoverFlow[T]: Flow[(Discover, T), (Res[Discoveries, T], T), NotUsed] =
+    flow[Discoveries, T]
+
+  def movieFlow[T]: Flow[(Get, T), (Res[Movie, T], T), NotUsed] =
+    flow[Movie, T]
 }

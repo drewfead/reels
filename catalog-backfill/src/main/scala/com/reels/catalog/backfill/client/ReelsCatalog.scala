@@ -2,18 +2,19 @@ package com.reels.catalog.backfill.client
 
 import java.time.format.DateTimeFormatter
 import java.time.{Instant, LocalDate, LocalDateTime, ZoneOffset}
+import java.util.concurrent.TimeUnit
 
 import akka.NotUsed
 import akka.actor.typed.ActorSystem
-import akka.http.javadsl.model.StatusCodes
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
 import akka.http.scaladsl.marshalling.Marshal
-import akka.http.scaladsl.model.{HttpMethods, HttpRequest, HttpResponse, RequestEntity, Uri}
+import akka.http.scaladsl.model.{HttpMethods, HttpRequest, HttpResponse, RequestEntity, StatusCodes, Uri}
 import akka.http.scaladsl.unmarshalling.Unmarshal
-import akka.stream.scaladsl.{Flow, Sink, Source}
+import akka.stream.scaladsl.{Flow, RetryFlow, Sink, Source}
 import spray.json.{DefaultJsonProtocol, JsValue, JsonFormat, RootJsonFormat}
 
+import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 
@@ -104,7 +105,7 @@ class ReelsCatalog(val baseUri: Uri)(implicit as: ActorSystem[_], ec: ExecutionC
   private def parseResponse[T]: Flow[(Try[HttpResponse], T), (Result[T], T), NotUsed] =
     Flow[(Try[HttpResponse], T)].flatMapConcat {
       case (Success(response), span) => response.status match {
-        case StatusCodes.CREATED => Source.future(Unmarshal(response.entity).to[ReelsCatalogResponse])
+        case StatusCodes.Created => Source.future(Unmarshal(response.entity).to[ReelsCatalogResponse])
           .map(s => Right[UnexpectedStatusCode[T], ReelsCatalogResponse](s) -> span)
         case status =>
           Source.single(Left[UnexpectedStatusCode[T], ReelsCatalogResponse](UnexpectedStatusCode(status, span)) -> span)
@@ -126,6 +127,27 @@ class ReelsCatalog(val baseUri: Uri)(implicit as: ActorSystem[_], ec: ExecutionC
       .via(requestFlow)
       .runWith(Sink.head)
 
+  private val retryStatuses = Seq(
+    StatusCodes.InternalServerError,
+    StatusCodes.BadGateway,
+    StatusCodes.RequestTimeout,
+    StatusCodes.GatewayTimeout,
+    StatusCodes.ServiceUnavailable,
+    StatusCodes.NetworkConnectTimeout,
+    StatusCodes.NetworkReadTimeout,
+  )
+
   def flow[T]: Flow[(ReelsCatalogRequest, T), (Result[T], T), NotUsed] =
-    requestFlow
+    RetryFlow.withBackoff(
+      minBackoff = FiniteDuration(10, TimeUnit.MILLISECONDS),
+      maxBackoff = FiniteDuration(250, TimeUnit.MILLISECONDS),
+      randomFactor = 0d,
+      flow = requestFlow[T],
+      maxRetries = 3
+    ) {
+      case ((request, span), (Left(UnexpectedStatusCode(status, _)), _)) if retryStatuses.contains(status) =>
+        Some(request -> span)
+      case _ =>
+        None
+    }
 }

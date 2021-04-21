@@ -9,7 +9,7 @@ import akka.event.Logging
 import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.util.FastFuture
 import akka.stream.Attributes.logLevels
-import akka.stream.scaladsl.{Flow, Source}
+import akka.stream.scaladsl.{Flow, RetryFlow, Source}
 import com.reels.catalog.backfill.client.TheMovieDatabaseRequest.{Discover, Get}
 import com.reels.catalog.backfill.client.TheMovieDatabaseResponse.{Movie => TMDBMovie}
 import com.reels.catalog.backfill.client.{ReelsCatalog, ReelsCatalogGenre, ReelsCatalogRequest, ReelsCatalogResponse, ReelsCatalogSpokenLanguage, TheMovieDatabase, TheMovieDatabaseRequest, UnexpectedStatusCode}
@@ -46,8 +46,10 @@ class Backfill(
         Source.unfoldAsync(p -> (p + 1)) {
           case (page, totalPages) if page < totalPages =>
             tmdb.discoverSingle(d.copy(page = Some(page + 1)), span).map {
-              case (discoveries, span) =>
+              case (Right(discoveries), span) =>
                 Some((discoveries.page -> discoveries.totalPages, discoveries.results -> span))
+              case (Left(err), span) => // just ddos the shit out of it I guess?
+                Some((page -> totalPages, Seq() -> span))
             }
           case _ =>
             FastFuture.successful(None)
