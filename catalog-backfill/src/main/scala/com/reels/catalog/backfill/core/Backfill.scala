@@ -39,7 +39,10 @@ class Backfill(
     )
   }
 
-  private def paginateDiscovery[T]: Flow[(Discover, T), (TMDBMovie, T), NotUsed] =
+  type Fallible[O, T] = Either[UnexpectedStatusCode[T], O]
+  type TFallible[O, T] = (Fallible[O, T], T)
+
+  private def paginateDiscovery[T]: Flow[(Discover, T), TFallible[TMDBMovie, T], NotUsed] =
     Flow[(Discover, T)].flatMapConcat {
       case (d, span) =>
         val p: Long = d.page.getOrElse(0L)
@@ -47,9 +50,9 @@ class Backfill(
           case (page, totalPages) if page < totalPages =>
             tmdb.discoverSingle(d.copy(page = Some(page + 1)), span).map {
               case (Right(discoveries), span) =>
-                Some((discoveries.page -> discoveries.totalPages, discoveries.results -> span))
-              case (Left(err), span) => // just ddos the shit out of it I guess?
-                Some((page -> totalPages, Seq() -> span))
+                Some((discoveries.page -> discoveries.totalPages, discoveries.results.map(Right(_)) -> span))
+              case (Left(err), span) =>
+                Some((page -> totalPages, Seq.fill(tmdbPageSize)(Left(err)) -> span))
             }
           case _ =>
             FastFuture.successful(None)
@@ -58,9 +61,9 @@ class Backfill(
         }
     }
 
-  private def convert[T]: Flow[(TMDBMovie, T), (ReelsCatalogRequest, T), NotUsed] =
-    Flow[(TMDBMovie, T)].map {
-      case (movie, span) => ReelsCatalogRequest(
+  private def convert[T]: Flow[TFallible[TMDBMovie, T], TFallible[ReelsCatalogRequest, T], NotUsed] =
+    Flow[TFallible[TMDBMovie, T]].map {
+      case (fallible, span) => fallible.map { movie => ReelsCatalogRequest(
         title = movie.title,
         tagline = movie.tagline,
         overview = Some(movie.overview),
@@ -79,11 +82,11 @@ class Backfill(
         },
         releaseDate = movie.releaseDate,
         foreignUrl = Some(tmdb.uriFor(Get(movie.id)).toString()),
-      ) -> span
+      )} -> span
     }
 
-  private def summarize[T]: Flow[(Either[UnexpectedStatusCode[T], ReelsCatalogResponse], T), (Backfilled, T), NotUsed] =
-    Flow[(Either[UnexpectedStatusCode[T], ReelsCatalogResponse], T)].map {
+  private def summarize[T]: Flow[TFallible[ReelsCatalogResponse, T], (Backfilled, T), NotUsed] =
+    Flow[TFallible[ReelsCatalogResponse, T]].map {
       case (Right(_), span) => Backfilled(1, 0, 0) -> span
       case (Left(UnexpectedStatusCode(StatusCodes.Conflict, _)), span) => Backfilled(0, 1, 0) -> span
       case (Left(_), span) => Backfilled(0, 0, 1) -> span
@@ -125,7 +128,15 @@ class Backfill(
       case _ => limited
     }
 
-    val summarized = offset
+    def failures[O] = offset.collect {
+      case (Left(err), span) => Left[UnexpectedStatusCode[T], O](err) -> span
+    }
+
+    val successes = offset.collect {
+      case (Right(success), span) => success -> span
+    }
+
+    val sentToCatalog = successes
       .via(catalog.flow[T].async)
       .log("request_catalog_creation")
       .withAttributes(
@@ -134,6 +145,8 @@ class Backfill(
           onFinish = Logging.DebugLevel,
           onFailure = Logging.ErrorLevel)
       )
+
+    val summarized = sentToCatalog.merge(failures)
       .via(summarize[T])
       .log("aggregate_catalog_results")
       .withAttributes(
