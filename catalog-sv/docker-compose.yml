@@ -20,6 +20,13 @@ services:
       - ./es/config.yml:/usr/share/elasticsearch/config/elasticsearch.yml
       - ./es/jvm.options:/usr/share/elasticsearch/config/jvm.options.d/extra.options
       - ./es/log4j2.properties:/usr/share/elasticsearch/config/log4j2.properties
+  index-vis:
+    image: docker.elastic.co/kibana/kibana:7.12.1
+    ports:
+      - 5601:5601
+    environment:
+      ELASTICSEARCH_URL: http://index:9200
+      ELASTICSEARCH_HOSTS: '["http://index:9200"]'
 volumes:
   database-data:
   index-data:

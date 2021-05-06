@@ -1,4 +1,4 @@
-use chrono::{NaiveDate, Utc, NaiveDateTime};
+use chrono::{NaiveDate, Utc, DateTime};
 use diesel::{AsChangeset, AsExpression, FromSqlRow, Identifiable, Insertable, Queryable};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -58,10 +58,11 @@ pub struct Movie {
     pub production_countries: Vec<Country>,
     pub genres: Vec<Genre>,
     pub release_date: Option<NaiveDate>,
-    pub created: NaiveDateTime,
-    pub updated: NaiveDateTime,
-    pub indexed: Option<NaiveDateTime>,
+    pub created: DateTime<Utc>,
+    pub updated: DateTime<Utc>,
+    pub indexed: Option<DateTime<Utc>>,
     pub foreign_url: Option<String>,
+    pub deleted: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Debug, AsChangeset)]
@@ -74,9 +75,10 @@ pub struct MovieChangeset {
     pub production_countries: Option<Vec<Country>>,
     pub genres: Option<Vec<Genre>>,
     pub release_date: Option<Option<NaiveDate>>,
-    pub updated: Option<NaiveDateTime>,
-    pub indexed: Option<NaiveDateTime>,
+    pub updated: Option<DateTime<Utc>>,
+    pub indexed: Option<DateTime<Utc>>,
     pub foreign_url: Option<Option<String>>,
+    pub deleted: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -97,7 +99,7 @@ pub struct CreateMovieParams {
 
 impl CreateMovieParams {
     fn create(&self) -> Movie {
-        let now = Utc::now().naive_utc();
+        let now = Utc::now();
         let id_namespace = Uuid::new_v5(&Uuid::nil(), format!("{:?}", &self.release_date).as_bytes());
         let id_name = format!("{:?}", &self.title).into_bytes();
         let id = Uuid::new_v5(&id_namespace, &id_name);
@@ -115,6 +117,7 @@ impl CreateMovieParams {
             updated: now,
             indexed: None,
             foreign_url: self.foreign_url.clone(),
+            deleted: None,
         }
     }
 }
@@ -134,7 +137,7 @@ pub struct UpdateMovieParams {
 
 impl UpdateMovieParams {
     fn update(&self) -> MovieChangeset {
-        let now = Utc::now().naive_utc();
+        let now = Utc::now();
         MovieChangeset {
             title: self.title.clone(),
             tagline: self.tagline.clone(),
@@ -146,6 +149,7 @@ impl UpdateMovieParams {
             updated: Some(now),
             indexed: None,
             foreign_url: self.foreign_url.clone(),
+            deleted: None,
         }
     }
 }
@@ -156,7 +160,7 @@ pub struct IndexMovie;
 
 impl IndexMovie {
     fn update(&self) -> MovieChangeset {
-        let now = Utc::now().naive_utc();
+        let now = Utc::now();
         MovieChangeset {
             title: None,
             tagline: None,
@@ -168,6 +172,30 @@ impl IndexMovie {
             updated: None,
             indexed: Some(now),
             foreign_url: None,
+            deleted: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteMovie;
+
+impl DeleteMovie {
+    fn update(&self) -> MovieChangeset {
+        let now = Utc::now();
+        MovieChangeset {
+            title: None,
+            tagline: None,
+            overview: None,
+            spoken_languages: None,
+            production_countries: None,
+            genres: None,
+            release_date: None,
+            updated: Some(now),
+            indexed: None,
+            foreign_url: None,
+            deleted: Some(now),
         }
     }
 }

@@ -50,6 +50,8 @@ async fn main() -> std::io::Result<()> {
 
     let indexer = dmn::indexer::IndexDaemon::start(pg_pool.clone(), es.clone(), Duration::seconds(10));
 
+    let deleter = dmn::deleter::DeleteDaemon::start(pg_pool.clone(), Duration::seconds(30));
+
     let bind = "127.0.0.1:8080";
 
     info!("Starting server at: {}", &bind);
@@ -59,6 +61,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(pg_pool.clone())
             .app_data(es.clone())
             .app_data(indexer.clone())
+            .app_data(deleter.clone())
             .wrap(middleware::Logger::default())
             .service(api::health)
             .service(scope("/catalog")

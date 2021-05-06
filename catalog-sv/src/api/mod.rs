@@ -17,7 +17,6 @@ pub async fn health() -> impl Responder {
     HttpResponse::Ok()
 }
 
-
 #[post("/movies/v1")]
 pub async fn post_movie(
     pool: web::Data<DbConnectionPool>,
@@ -69,14 +68,17 @@ pub async fn put_movie(
     let conn: DbConnection = pool.get()
         .expect("couldn't get db connection from pool");
 
-    let movie = web::block(move || action::update_movie(&conn, movie_id.into_inner(), req.into_inner()))
+    let updated = web::block(move || action::update_movie(&conn, movie_id.into_inner(), req.into_inner()))
         .await
         .map_err(|e| {
             error!("{}", e);
             HttpResponse::InternalServerError().finish()
         })?;
 
-    Ok(HttpResponse::Ok().json(movie))
+    match updated {
+        None => Ok(HttpResponse::NotFound().finish()),
+        Some(movie) => Ok(HttpResponse::Ok().json(movie))
+    }
 }
 
 #[delete("/movies/v1/{movie_id}")]

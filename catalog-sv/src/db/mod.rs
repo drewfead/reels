@@ -169,7 +169,7 @@ pub fn create_movie(conn: &DbConnection, movie: Movie) -> Result<Option<Movie>, 
         .map_err(DBQueryError)
 }
 
-pub fn update_movie(conn: &DbConnection, movie_id: Uuid, movie: MovieChangeset) -> Result<Movie, Error> {
+pub fn update_movie(conn: &DbConnection, movie_id: Uuid, movie: MovieChangeset) -> Result<Option<Movie>, Error> {
     use schema::movies;
     use schema::movies::dsl::*;
 
@@ -181,6 +181,7 @@ pub fn update_movie(conn: &DbConnection, movie_id: Uuid, movie: MovieChangeset) 
 
     query
         .get_result(conn)
+        .optional()
         .map_err(DBQueryError)
 }
 
@@ -216,6 +217,22 @@ pub fn delete_movie(conn: &DbConnection, movie_id: Uuid) -> Result<bool, Error> 
         .execute(conn)
         .map_err(DBQueryError)
         .map(|r| r > 0)
+}
+
+pub fn delete_soft_deleted(conn: &DbConnection) -> Result<usize, Error> {
+    use schema::movies::dsl;
+
+    let query = diesel::delete(schema::movies::table)
+        .filter(dsl::deleted.is_not_null()
+            .and(dsl::indexed.is_not_null())
+            .and(dsl::deleted.lt(dsl::indexed)))
+        .into_boxed::<diesel::pg::Pg>();
+
+    debug!("{}", diesel::debug_query(&query));
+
+    query
+        .execute(conn)
+        .map_err(DBQueryError)
 }
 
 pub fn find_stale_indexed(conn: &DbConnection, page_size: i64) -> Result<Vec<Movie>, Error> {

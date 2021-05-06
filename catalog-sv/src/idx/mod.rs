@@ -42,10 +42,16 @@ pub async fn index_movies(client: &IndexClient, movies: Vec<Movie>) -> Result<Ve
     let mut body: Vec<JsonBody<_>> = Vec::with_capacity(movies.len() * 2);
 
     movies.iter().try_for_each(|m: &Movie| {
-        serde_json::to_value(m).map(|json| {
-            body.push(json!({"index": {"_id": m.id.clone()}}).into());
-            body.push(JsonBody::new(json))
-        })
+        match m.deleted {
+            None => serde_json::to_value(m).map(|json| {
+                body.push(json!({"index": {"_id": m.id.clone()}}).into());
+                body.push(JsonBody::new(json))
+            }),
+            Some(_) => serde_json::to_value(m).map(|json| {
+                body.push(json!({"delete": {"_id": m.id.clone()}}).into());
+            }),
+        }
+
     }).map_err(SerdeJsonError)?;
 
     let response = client

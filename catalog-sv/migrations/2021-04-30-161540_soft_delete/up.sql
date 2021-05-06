@@ -1,0 +1,2 @@
+ALTER TABLE movies
+ADD COLUMN deleted TIMESTAMP NULL;
