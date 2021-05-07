@@ -1,4 +1,4 @@
-use chrono::{NaiveDate, Utc, DateTime};
+use chrono::{DateTime, NaiveDate, Utc};
 use diesel::{AsChangeset, AsExpression, FromSqlRow, Identifiable, Insertable, Queryable};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -7,6 +7,11 @@ use crate::db::schema::movies;
 
 pub mod action;
 pub mod error;
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct HasId {
+    pub id: Uuid,
+}
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct PaginationParameters {
@@ -46,7 +51,7 @@ pub struct Genre {
     pub name: String,
 }
 
-#[derive(Clone, Debug, Serialize, Identifiable, Insertable, Queryable)]
+#[derive(Clone, Debug, Deserialize, Serialize, Identifiable, Insertable, Queryable)]
 #[serde(rename_all = "camelCase")]
 #[table_name="movies"]
 pub struct Movie {

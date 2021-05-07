@@ -8,10 +8,12 @@ use r2d2::Pool;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::core::{Movie, MovieChangeset, Page};
+use crate::core::{Movie, MovieChangeset, Page, HasId};
 use crate::core::error::Error;
 use crate::core::error::Error::{AnchorDecodeError, AnchorParseError, DBQueryError};
 use crate::db::pagination::*;
+use either::Either;
+use either::Either::{Right, Left};
 
 pub mod schema;
 pub mod types;
@@ -152,7 +154,21 @@ pub fn find_one_movie(conn: &DbConnection, movie_id: Uuid) -> Result<Option<Movi
         .map_err(DBQueryError)
 }
 
-pub fn create_movie(conn: &DbConnection, movie: Movie) -> Result<Option<Movie>, Error> {
+pub fn find_movies_with_ids(conn: &DbConnection, movie_ids: Vec<Uuid>) -> Result<Page<Movie>, Error> {
+    use schema::movies::dsl::*;
+
+    let items: Vec<Movie> = movies.filter(id.eq_any(movie_ids))
+        .load(conn)
+        .map_err(DBQueryError)?;
+
+    Ok(Page {
+        page_number: 1,
+        next_anchor: None,
+        items,
+    })
+}
+
+pub fn create_movie(conn: &DbConnection, movie: Movie) -> Result<Either<HasId, Movie>, Error> {
     use schema::movies;
     use schema::movies::dsl::*;
 
@@ -163,10 +179,14 @@ pub fn create_movie(conn: &DbConnection, movie: Movie) -> Result<Option<Movie>, 
 
     debug!("{}", diesel::debug_query(&query));
 
-    query
+    let option: Option<Movie> = query
         .get_result(conn)
         .optional()
-        .map_err(DBQueryError)
+        .map_err(DBQueryError)?;
+
+    Ok(option.map_or(Left(HasId {
+        id: movie.id.clone()
+    }), |r| Right(r)))
 }
 
 pub fn update_movie(conn: &DbConnection, movie_id: Uuid, movie: MovieChangeset) -> Result<Option<Movie>, Error> {
@@ -220,12 +240,12 @@ pub fn delete_movie(conn: &DbConnection, movie_id: Uuid) -> Result<bool, Error> 
 }
 
 pub fn delete_soft_deleted(conn: &DbConnection) -> Result<usize, Error> {
-    use schema::movies::dsl;
+    use schema::movies::dsl::*;
 
     let query = diesel::delete(schema::movies::table)
-        .filter(dsl::deleted.is_not_null()
-            .and(dsl::indexed.is_not_null())
-            .and(dsl::deleted.lt(dsl::indexed)))
+        .filter(deleted.is_not_null()
+            .and(indexed.is_not_null())
+            .and(deleted.lt(indexed)))
         .into_boxed::<diesel::pg::Pg>();
 
     debug!("{}", diesel::debug_query(&query));

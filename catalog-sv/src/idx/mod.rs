@@ -1,3 +1,4 @@
+use base64::URL_SAFE_NO_PAD;
 use elasticsearch::{BulkParts, Elasticsearch, SearchParts};
 use elasticsearch::http::request::JsonBody;
 use elasticsearch::indices::{IndicesCreateParts, IndicesExistsParts};
@@ -5,10 +6,11 @@ use log::debug;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::core::{Movie, Page, HasId};
 use crate::core::error::Error;
-use crate::core::error::Error::{IndexQueryError, IndexQueryPartialError, SerdeJsonError, AnchorDecodeError, AnchorParseError};
-use crate::core::{Movie, Page};
-use base64::URL_SAFE_NO_PAD;
+use crate::core::error::Error::{AnchorDecodeError, AnchorParseError, IndexQueryError, IndexQueryPartialError, SerdeJsonError};
+use either::Either;
+use either::Either::{Right, Left};
 
 mod schema;
 
@@ -47,9 +49,10 @@ pub async fn index_movies(client: &IndexClient, movies: Vec<Movie>) -> Result<Ve
                 body.push(json!({"index": {"_id": m.id.clone()}}).into());
                 body.push(JsonBody::new(json))
             }),
-            Some(_) => serde_json::to_value(m).map(|json| {
+            Some(_) => {
                 body.push(json!({"delete": {"_id": m.id.clone()}}).into());
-            }),
+                Ok(())
+            }
         }
 
     }).map_err(SerdeJsonError)?;
@@ -88,18 +91,23 @@ fn serialize_anchor(anch: MovieAnchor) -> String {
     base64::encode_config(d, URL_SAFE_NO_PAD)
 }
 
-pub async fn search_movies(client: &IndexClient, search_term: &String, count: i64, anchor: &Option<String>) -> Result<Page<Movie>, Error> {
-    let last_page = match anchor {
-        None => 0,
+pub async fn search_movies(
+    client: &IndexClient,
+    search_term: &String,
+    count: i64,
+    anchor: &Option<String>
+) -> Result<Page<Either<HasId, Movie>>, Error> {
+    let this_page = match anchor {
+        None => 1,
         Some(anch) => deserialize_anchor(anch.to_string())?.page_number
     };
 
-    let from = last_page * count;
+    let from = (this_page - 1) * count;
     
     let query = json!({
             "query": {
                 "simple_query_string": {
-                    "query": search_term,
+                    "query": format!("\"{}\"", search_term),
                     "fields": [ "title" ],
                 }
             }
@@ -107,21 +115,53 @@ pub async fn search_movies(client: &IndexClient, search_term: &String, count: i6
     
     debug!("{}", query);
 
-    let response = client
+    let response: Value = client
         .search(SearchParts::Index(&[schema::INDEX_NAME]))
         .from(from)
         .size(count)
         .body(query)
         .send()
         .await?
-        .text()
-        .await?;
+        .error_for_status_code()
+        .map_err(IndexQueryError)?
+        .json()
+        .await
+        .map_err(IndexQueryError)?;
     
     debug!("{}", response);
+
+    let total_count: i64 = response["hits"]["total"]["value"]
+        .as_i64()
+        .unwrap_or(0);
+
+    let remaining_count = total_count - this_page * count;
+
+    let items: Vec<Either<HasId, Movie>> = response["hits"]["hits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|hit|
+            serde_json::from_value::<Movie>(hit["_source"].clone())
+                .map(|m| Right(m))
+                .or_else(|_|
+                    serde_json::from_value::<HasId>(hit["_source"].clone())
+                        .map(|id| Left(id))
+                )
+                .unwrap()
+        )
+        .collect();
+
+    let next_anchor = if remaining_count > 0 {
+        Some(MovieAnchor {
+            page_number: this_page + 1
+        })
+    } else {
+        None
+    };
     
     Ok(Page {
-        page_number: last_page + 1,
-        next_anchor: None,
-        items: Vec::new(),
+        page_number: this_page,
+        next_anchor: next_anchor.map(serialize_anchor),
+        items,
     })
 }

@@ -1,3 +1,5 @@
+use std::sync::Mutex;
+
 use actix_web::error::BlockingError;
 use actix_web::rt::time::{Instant, interval_at};
 use actix_web::web;
@@ -9,7 +11,6 @@ use log::error;
 use crate::core::action;
 use crate::core::error::Error;
 use crate::db::{DbConnection, DbConnectionPool};
-use std::sync::Mutex;
 
 pub struct DeleteDaemon;
 

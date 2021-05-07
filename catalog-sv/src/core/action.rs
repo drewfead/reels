@@ -1,14 +1,15 @@
 use log::{debug, info};
 use uuid::Uuid;
 
-use crate::core::{Movie, Page, CreateMovieParams, UpdateMovieParams, IndexMovie, DeleteMovie};
+use crate::core::{CreateMovieParams, DeleteMovie, IndexMovie, Movie, Page, UpdateMovieParams, HasId};
 use crate::core::error::Error;
 use crate::db;
 use crate::db::DbConnection;
 use crate::idx;
 use crate::idx::IndexClient;
+use either::Either;
 
-pub fn create_movie(conn: &DbConnection, movie: CreateMovieParams) -> Result<Option<Movie>, Error> {
+pub fn create_movie(conn: &DbConnection, movie: CreateMovieParams) -> Result<Either<HasId, Movie>, Error> {
     info!("creating movie {:?}", movie);
     db::create_movie(conn, movie.create())
 }
@@ -47,12 +48,25 @@ pub fn find_movies(conn: &DbConnection, count: i64, anchor: &Option<String>) -> 
     db::find_movies(conn, count, anchor)
 }
 
+pub fn find_movies_with_ids(conn: &DbConnection, ids: Vec<Uuid>) -> Result<Page<Movie>, Error> {
+    if ids.is_empty() {
+        return Ok(Page {
+            page_number: 1,
+            next_anchor: None,
+            items: Vec::new(),
+        })
+    }
+
+    info!("finding movies with ids in {:?}", ids);
+    db::find_movies_with_ids(conn, ids)
+}
+
 pub async fn search_movies(
     client: &IndexClient,
     search_term: &String,
     count: i64,
     anchor: &Option<String>
-) -> Result<Page<Movie>, Error> {
+) -> Result<Page<Either<HasId, Movie>>, Error> {
     info!("searching movies search_term={} count={:?} anchor={:?}", search_term, count, anchor);
     idx::search_movies(client, search_term, count, anchor).await
 }

@@ -5,14 +5,15 @@ extern crate log;
 extern crate rmp_serde;
 
 use actix_web::{App, HttpServer, middleware};
-use actix_web::web::{scope, Data};
+use actix_web::web::{Data, scope};
+use chrono::Duration;
 use diesel::PgConnection;
 use diesel::r2d2::ConnectionManager;
 use elasticsearch::Elasticsearch;
-use log::info;
 use elasticsearch::http::transport::{SingleNodeConnectionPool, TransportBuilder};
 use elasticsearch::http::Url;
-use chrono::Duration;
+use log::info;
+
 use crate::core::action;
 
 mod api;
@@ -25,7 +26,7 @@ mod idx;
 async fn main() -> std::io::Result<()> {
     dotenv::dotenv().ok();
     std::env::set_var("RUST_LOG",
-      format!("{}actix_web=debug", std::env::var("RUST_LOG")
+      format!("{}actix_web=debug,hyper=info", std::env::var("RUST_LOG")
           .map_or_else(|_| "".to_string(), |ll| format!("{},", ll))
       ));
     env_logger::init();
