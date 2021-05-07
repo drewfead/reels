@@ -51,9 +51,10 @@ pub struct Genre {
     pub name: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, Identifiable, Insertable, Queryable)]
+#[derive(Clone, Debug, Deserialize, Serialize, Identifiable, Insertable, Queryable, AsChangeset)]
 #[serde(rename_all = "camelCase")]
 #[table_name="movies"]
+#[changeset_options(treat_none_as_null = "true")]
 pub struct Movie {
     pub id: Uuid,
     pub title: String,

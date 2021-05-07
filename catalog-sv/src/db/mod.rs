@@ -3,21 +3,21 @@ use chrono::NaiveDate;
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, PooledConnection};
+use either::Either;
+use either::Either::{Left, Right};
 use log::debug;
 use r2d2::Pool;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::core::{Movie, MovieChangeset, Page, HasId};
+use crate::core::{HasId, Movie, MovieChangeset, Page};
 use crate::core::error::Error;
 use crate::core::error::Error::{AnchorDecodeError, AnchorParseError, DBQueryError};
 use crate::db::pagination::*;
-use either::Either;
-use either::Either::{Right, Left};
 
 pub mod schema;
 pub mod types;
-pub mod pagination;
+mod pagination;
 
 pub type DbConnection = PooledConnection<ConnectionManager<PgConnection>>;
 pub type DbConnectionPool = Pool<ConnectionManager<PgConnection>>;
@@ -53,6 +53,7 @@ pub fn find_movies(conn: &DbConnection, page_size: i64, anchor: &Option<String>)
             let page_number = 1;
 
             let query = movies
+                .filter(deleted.is_null())
                 .order((title.asc(), release_date.desc().nulls_last()))
                 .count_remaining(page_size);
 
@@ -113,6 +114,7 @@ pub fn find_movies(conn: &DbConnection, page_size: i64, anchor: &Option<String>)
             };
 
             let query = next_q
+                .filter(deleted.is_null())
                 .order((title.asc(), release_date.desc().nulls_last()))
                 .count_remaining(page_size);
 
@@ -149,6 +151,7 @@ pub fn find_one_movie(conn: &DbConnection, movie_id: Uuid) -> Result<Option<Movi
     use schema::movies::dsl::*;
 
     movies.filter(id.eq(movie_id))
+        .filter(deleted.is_null())
         .first(conn)
         .optional()
         .map_err(DBQueryError)
@@ -158,6 +161,7 @@ pub fn find_movies_with_ids(conn: &DbConnection, movie_ids: Vec<Uuid>) -> Result
     use schema::movies::dsl::*;
 
     let items: Vec<Movie> = movies.filter(id.eq_any(movie_ids))
+        .filter(deleted.is_null())
         .load(conn)
         .map_err(DBQueryError)?;
 
@@ -175,6 +179,10 @@ pub fn create_movie(conn: &DbConnection, movie: Movie) -> Result<Either<HasId, M
     let query = diesel::insert_into(movies::table)
         .values(&movie)
         .on_conflict(id)
+        // todo: add extension to support where clause on conflict updates
+        // .do_update()
+        // .set(&movie)
+        // .filter(deleted.is_not_null())
         .do_nothing();
 
     debug!("{}", diesel::debug_query(&query));
@@ -195,7 +203,8 @@ pub fn update_movie(conn: &DbConnection, movie_id: Uuid, movie: MovieChangeset) 
 
     let query = diesel::update(movies::table)
         .set(&movie)
-        .filter(id.eq(&movie_id));
+        .filter(id.eq(&movie_id))
+        .filter(deleted.is_null());
 
     debug!("{}", diesel::debug_query(&query));
 
@@ -229,7 +238,8 @@ pub fn delete_movie(conn: &DbConnection, movie_id: Uuid) -> Result<bool, Error> 
     use schema::movies::dsl::*;
 
     let query = diesel::delete(movies::table)
-        .filter(id.eq(movie_id));
+        .filter(id.eq(movie_id))
+        .filter(deleted.is_null());
 
     debug!("{}", diesel::debug_query(&query));
 
